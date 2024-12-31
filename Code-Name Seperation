@@ -1,0 +1,115 @@
+import pandas as pd
+
+# Define common suffixes and deceased markers
+SUFFIXES = ["Jr", "Sr", "III", "IV", "II", "Esq"]
+DECEASED_MARKERS = ["Deceased", "(Deceased)", "Late", "(deceased)"]
+
+# Add a list of common prefixes that should not be split
+PREFIXES = ["Van", "Vander", "Von", "Mc", "Mac", "De", "O'"]
+
+# Load the Excel file (replace with your file path)
+input_file = "Names.xlsx"  # Replace with your file path
+df = pd.read_excel(input_file)
+
+# Assume the column with full names is named "Full Name"
+full_name_col = "Name"
+
+# Ensure all values in the "Full Name" column are strings and handle NaN values
+df[full_name_col] = df[full_name_col].fillna("").astype(str)
+
+# Initialize an empty DataFrame for the output
+output_df = pd.DataFrame(columns=["Input Name", "First Name", "Middle Name", "Last Name", "Suffix", "Deceased", "Name Category"])
+
+# Helper function to categorize names
+def categorize_name(name, parts, suffix, middle_name_present):
+    if "," in name:
+        return "has comma"
+    if suffix and middle_name_present:
+        return "has suffix and middle name"
+    if suffix:
+        return "has only suffix"
+    if middle_name_present:
+        return "has middle name" if len(parts) >= 3 else "has only middle name"
+    return "normal first name and last name"
+
+# Helper function to intelligently process prefixes in names
+def handle_prefixes(parts):
+    # Join prefix parts if they match a known pattern (e.g., "Van", "Vander", etc.)
+    if len(parts) > 1 and parts[0] in PREFIXES:
+        # Combine prefix with the next part (e.g., "Van Der" becomes "Van Der")
+        parts[0] = f"{parts[0]} {parts[1]}"
+        del parts[1]  # Remove the next part as it is now part of the first
+    return parts
+
+# Helper function to process each row
+def process_name(full_name):
+    # Check if the input is not a string
+    if not isinstance(full_name, str) or full_name.strip() == "":
+        return [{"Input Name": full_name, "First Name": "", "Middle Name": "", "Last Name": "", "Suffix": "", "Deceased": "No", "Name Category": "invalid entry"}]
+    
+    original_name = full_name  # Keep the input name for reference
+    full_name = full_name.strip()
+    deceased = False
+    suffix = ""
+    category = ""
+    
+    # Check for deceased markers (case-insensitive)
+    for marker in DECEASED_MARKERS:
+        if marker.lower() in full_name.lower():
+            deceased = True
+            full_name = full_name.replace(marker, "").strip()  # Remove marker from name
+    
+    # Split by comma to separate Last Name and the rest
+    if "," in full_name:
+        last_name, rest = full_name.split(",", 1)
+        last_name = last_name.strip()
+    else:
+        last_name, rest = "", full_name  # No last name part, assume all in "rest"
+    
+    # Check for suffix
+    parts = rest.split()
+    if parts and parts[-1] in SUFFIXES:
+        suffix = parts[-1]
+        rest = " ".join(parts[:-1])  # Remove suffix from the rest of the name
+    
+    # Split by connectors like '&' or 'and' for multiple names
+    if "&" in rest or "and" in rest:
+        connectors = ["&", "and"]
+        for connector in connectors:
+            if connector in rest:
+                names = [name.strip() for name in rest.split(connector)]
+                break
+    else:
+        names = [rest.strip()]
+    
+    # Prepare individual rows for each person
+    rows = []
+    for name in names:
+        parts = name.split()
+        parts = handle_prefixes(parts)  # Handle prefixes intelligently
+        middle_name_present = len(parts) > 2
+        if len(parts) == 1:
+            category = categorize_name(original_name, parts, suffix, False)
+            rows.append({"Input Name": original_name, "First Name": parts[0], "Middle Name": "", "Last Name": last_name, "Suffix": suffix, "Deceased": "Yes" if deceased else "No", "Name Category": category})
+        elif len(parts) == 2:
+            category = categorize_name(original_name, parts, suffix, False)
+            rows.append({"Input Name": original_name, "First Name": parts[0], "Middle Name": "", "Last Name": parts[1] if not last_name else last_name, "Suffix": suffix, "Deceased": "Yes" if deceased else "No", "Name Category": category})
+        elif len(parts) >= 3:
+            category = categorize_name(original_name, parts, suffix, True)
+            rows.append({"Input Name": original_name, "First Name": parts[0], "Middle Name": " ".join(parts[1:-1]), "Last Name": parts[-1] if not last_name else last_name, "Suffix": suffix, "Deceased": "Yes" if deceased else "No", "Name Category": category})
+    return rows
+
+# Process each row in the DataFrame
+for index, row in df.iterrows():
+    full_name = row[full_name_col]
+    try:
+        extracted_rows = process_name(full_name)
+        output_df = pd.concat([output_df, pd.DataFrame(extracted_rows)], ignore_index=True)
+    except Exception as e:
+        print(f"Error processing row {index} with name {full_name}: {e}")
+
+# Save the cleaned data to a new Excel file
+output_file = "processed_names_with_categories.xlsx"  # Replace with your desired output path
+output_df.to_excel(output_file, index=False)
+
+print(f"Processed data with input names and categories saved to {output_file}")
